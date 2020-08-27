@@ -1,0 +1,1 @@
+dotnet paket pack out

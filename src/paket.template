@@ -1,0 +1,4 @@
+type project
+id Fable.IcoMoonProvider
+files
+  bin/Release ==> lib
