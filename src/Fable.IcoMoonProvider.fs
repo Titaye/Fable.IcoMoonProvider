@@ -86,17 +86,17 @@ open System.Text.RegularExpressions
 open FSharp.Quotations
 open FSharp.Core.CompilerServices
 open ProviderImplementation.ProvidedTypes
-open Newtonsoft.Json.Linq
+// open Newtonsoft.Json.Linq
 
 open ProviderDsl
 open Fable.SimpleHttp
 
 
-let sanitizeName (name:string) =
-    name.Replace('-', '_')
+// let sanitizeName (name:string) =
+//     name.Replace('-', '_')
 
 let convertChar (name:string, char:string) =
-    Property(name |> sanitizeName, String, true, (fun _args -> <@@ char @@>) )
+    Property(name, String, true, (fun _args -> <@@ char @@>) )
 
 let convertChars asm ns typeName chars =
     makeRootType(asm, ns, typeName, chars |> List.map convertChar)
@@ -112,6 +112,83 @@ type public IcoMoonProvider (config : TypeProviderConfig) as this =
     let generator = ProvidedTypeDefinition(asm, ns, "Generator", Some typeof<obj>, isErased = true)
 
     let watcherSubscriptions = System.Collections.Concurrent.ConcurrentDictionary<string, System.IDisposable>()
+
+    let tryFindObjectProperty nameToFind (json:JsonParser.Json) =
+        match json with
+        | JsonParser.Json.Object (properties) ->
+            properties
+            |> List.tryPick (fun (name, value) -> if name = nameToFind then Some value else None )
+        | _ -> None
+
+    let tryAsString (json:JsonParser.Json) =
+        match json with
+        | JsonParser.Json.String value -> Some value
+        | _ -> None
+
+    let tryAsNumber (json:JsonParser.Json) =
+        match json with
+        | JsonParser.Json.Number value -> Some value
+        | _ -> None
+
+    let tryAsArray (json:JsonParser.Json) =
+        match json with
+        | JsonParser.Json.Array value -> Some value
+        | _ -> None
+
+    let getFontPrefix (json:JsonParser.Json) =
+        json
+        |> tryFindObjectProperty "preferences"
+        |> Option.bind (tryFindObjectProperty "fontPref")
+        |> Option.bind (tryFindObjectProperty "prefix")
+        |> Option.bind tryAsString
+        |> Option.defaultValue ""
+
+    let tryGetNameAndCodeProperty (prefix:string) (json:JsonParser.Json) =
+        match json with
+        | JsonParser.Json.Object (properties) ->
+
+                        // let name = prefix + jo.Value<string>("name")
+                        // let code = System.Char.ConvertFromUtf32 (jo.Value<int>("code")) |> string
+                        // Some (name, code)
+            let name =
+                properties
+                |> List.tryPick (fun (name, value) ->
+                    if name = "name" then
+                        value
+                        |> tryAsString
+                        |> Option.map (fun str -> prefix + str)
+                    else None )
+            let code =
+                properties
+                |> List.tryPick (fun (name, value) ->
+                    if name = "code" then
+                        value
+                        |> tryAsNumber
+                    else None )
+
+            match name, code with
+            | Some name, Some code ->
+                Some (name, System.Char.ConvertFromUtf32 ( code |> System.Convert.ToInt32) |> string)
+            | _ -> None
+
+        | _ -> None
+
+    let getIconProperties prefix (json:JsonParser.Json) =
+        json
+        |> tryFindObjectProperty "icons"
+        |> Option.bind tryAsArray
+        |> Option.map (fun icons ->
+
+            icons
+            |> List.choose (fun icon ->
+                icon
+                |> tryFindObjectProperty "properties"
+                |> Option.bind (tryGetNameAndCodeProperty prefix)
+            )
+            // tryFindObjectProperty "prefix"
+        )
+        |> Option.defaultValue []
+        //json.SelectToken("preferences.fontPref.prefix") |> Option.ofObj |> Option.map (fun t -> t.Value<string>() )  |> Option.defaultValue ""
 
     let buildTypes typeName (pVals:obj[]) =
         match pVals with
@@ -145,23 +222,14 @@ type public IcoMoonProvider (config : TypeProviderConfig) as this =
                         System.IO.File.ReadAllText(filepath,System.Text.Encoding.UTF8)
 
 
-                let json = JObject.Parse content
-                let chars =
-                    json.SelectTokens("icons[*].properties")
-                    |> Seq.choose( fun t ->
-                        match t with
-                        | :? JObject as jo ->
-                            try
-                                let name = jo.Value<string>("name")
-                                let code = System.Char.ConvertFromUtf32 (jo.Value<int>("code")) |> string
-                                Some (name, code)
-                            with
-                            | _ -> None
-                        | _ -> None
-                    )
-                    |> Seq.toList
+                let json = JsonParser.parse content
+                if json.IsNone then failwith "invalid json"
 
 
+
+                let prefix = json.Value |> getFontPrefix
+
+                let chars = json.Value |> getIconProperties prefix
 
                 convertChars asm ns typeName chars
 

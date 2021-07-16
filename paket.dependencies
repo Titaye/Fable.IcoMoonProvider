@@ -1,5 +1,6 @@
 source https://api.nuget.org/v3/index.json
 
+lowest_matching: true
 nuget Fable.Core >= 3.0.0
 nuget Fable.Elmish.React >= 3.0.1
 nuget Fable.SimpleHttp >= 2.5.0
